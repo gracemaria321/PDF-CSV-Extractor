@@ -1,0 +1,6 @@
+py -3.15 -m venv .venv
+".venv\Scripts\python.exe" -m pip install --upgrade pip
+".venv\Scripts\python.exe" -m pip install Flask pdfplumber opencv-python numpy pytesseract Pillow pdf2image
+rmdir /s /q build
+rmdir /s /q dist
+".venv\Scripts\python.exe" -m PyInstaller --clean --noconfirm Extractor.spec
