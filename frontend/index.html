@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CookAttorneyVault-PDF Tables Extractor</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>"/>
+  
+  <!-- CDNs for FontAwesome Icons and JSZip for ZIP downloads -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" /> 
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin /> 
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;900&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Top App Navigation -->
+  <header class="app-header" href="#">
+    <div class="logo-area">
+      <div class="logo-icon">⚖️</div>
+      <div>
+        <h1>CookAttorneyVault</h1>
+        <p>PDF Table Extractor & Converter</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="status-badge" id="appStatus"><i class="fa-solid fa-circle-check"></i> System Ready</span>
+    </div>
+  </header>
+
+  <!-- Main Grid Layout -->
+  <main class="app-container">
+    
+    <!-- Left Sidebar: Settings & Upload -->
+    <aside class="sidebar-panel">
+      
+      <!-- Upload Box -->
+      <section class="card upload-card">
+        <h2><i class="fa-solid fa-cloud-arrow-up"></i> Document Source</h2>
+        
+        <div class="drop-zone" id="dropZone">
+          <i class="fa-solid fa-file-pdf drop-icon"></i>
+          <p class="drop-title">Drag & Drop PDF here</p>
+          <p class="drop-subtitle">or click to browse local files</p>
+          <span class="file-limits">Supports digital & scanned PDFs up to 50MB</span>
+          <input type="file" id="pdfFileInput" accept="application/pdf" hidden />
+        </div>
+
+        <div class="file-meta-card hidden" id="fileMetaCard">
+          <div class="file-icon"><i class="fa-solid fa-file-pdf"></i></div>
+          <div class="file-info">
+            <h4 id="fileName">document.pdf</h4>
+            <p id="fileSize">2.4 MB • 4 Pages</p>
+          </div>
+          <button class="icon-btn remove-btn" id="removeFileBtn" title="Remove PDF"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+      </section>
+
+      <!-- OCR Settings Controls -->
+      <section class="card config-card">
+        <h2><i class="fa-solid fa-sliders"></i> Extraction Engine Settings</h2>
+
+        <div class="form-group">
+          <label><i class="fa-solid fa-microchip"></i> Recognition Engine Mode</label>
+          <select id="engineModeSelect">
+            <option value="hybrid" selected>Auto-Detect</option>
+            <option value="ocr_scanned">OCR Vision Engine (Scanned / Image PDF)</option>
+            <option value="vector_digital">Direct Vector Extraction (Native Text PDF)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label><i class="fa-solid fa-language"></i> Primary Language</label>
+          <select id="ocrLanguageSelect">
+            <option value="eng" selected>English (eng)</option>
+            <option value="spa">Spanish (spa)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label><i class="fa-solid fa-border-all"></i> Table Border Strategy</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" id="chkImplicit" checked /> Detect borderless / whitespace rows</label>
+            <label><input type="checkbox" id="chkDeskew" checked /> Auto-deskew & enhance low resolution</label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label><i class="fa-solid fa-copy"></i> Page Scope Range</label>
+          <input type="text" id="pageRangeInput" placeholder="e.g. 1-3, 5 (Leave blank for all)" />
+        </div>
+
+        <button class="btn btn-primary btn-block" id="processPdfBtn" disabled>
+          <i class="fa-solid fa-bolt"></i> Process & Extract Tables
+        </button>
+      </section>
+
+    </aside>
+
+    <!-- Main Content Panel: Preview & Interactive Data Table -->
+    <section class="main-workspace">
+      
+      <!-- Top Action Bar for Document Navigation & Downloads -->
+      <div class="workspace-header card">
+        <div class="table-selector-group">
+          <label for="tableSelect">Detected Tables:</label>
+          <select id="tableSelect" disabled>
+            <option>No document processed yet</option>
+          </select>
+        </div>
+
+        <div class="export-actions">
+          <button class="btn btn-secondary" id="exportCurrentBtn" disabled>
+            <i class="fa-solid fa-download"></i> Download CSV
+          </button>
+          <button class="btn btn-success" id="exportAllZipBtn" disabled>
+            <i class="fa-solid fa-file-zipper"></i> Download All (ZIP)
+          </button>
+        </div>
+      </div>
+
+      <!-- Content View -->
+      <div class="workspace-body">
+        
+        <!-- Interactive Editable Table -->
+        <div class="card table-editor-panel">
+          <div class="panel-title">
+            <span><i class="fa-solid fa-table"></i> Extracted Data Table</span>
+            <div class="table-tools">
+              <button class="btn-sm" id="addRowBtn" disabled><i class="fa-solid fa-plus"></i> Add Row</button>
+              <button class="btn-sm" id="addColBtn" disabled><i class="fa-solid fa-plus"></i> Add Column</button>
+              <button class="btn-sm danger" id="cleanEmptyBtn" disabled><i class="fa-solid fa-filter"></i> Clean Empty</button>
+            </div>
+          </div>
+
+          <div class="search-bar-row">
+            <div class="search-input-wrapper">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" id="tableSearchInput" placeholder="Filter extracted cells..." disabled />
+            </div>
+            <span class="row-count" id="rowCountText">0 rows, 0 columns</span>
+          </div>
+
+          <!-- Printable / Editable Table Container -->
+          <div class="table-wrapper" id="tableWrapper">
+            <div class="placeholder-state" id="tablePlaceholder">
+              <i class="fa-solid fa-table-cells"></i>
+              <p>Extracted CSV preview will appear here</p>
+            </div>
+            <table class="data-table hidden" id="editableDataTable">
+              <thead id="tableHeader"></thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- OCR Processing Overlay Modal -->
+  <div class="modal-overlay hidden" id="processingModal">
+    <div class="modal-card">
+      <div class="spinner-container">
+        <div class="spinner"></div>
+      </div>
+      <h3 id="modalStatusTitle">Analyzing PDF Layout...</h3>
+      <p id="modalStatusDetail">Running Tesseract OCR character detection on page 1...</p>
+      
+      <div class="progress-bar-container">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+      <span class="progress-percent" id="progressPercent">0%</span>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
