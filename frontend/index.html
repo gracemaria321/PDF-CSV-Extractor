@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>CookAttorneyVault-PDF Tables Extractor</title>
+    <title>DocumentsVault-PDF Tables Extractor</title>
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚖️</text></svg>"/>
   
   <!-- CDNs for FontAwesome Icons and JSZip for ZIP downloads -->
@@ -22,7 +22,7 @@
     <div class="logo-area">
       <div class="logo-icon">⚖️</div>
       <div>
-        <h1>CookAttorneyVault</h1>
+        <h1>DocumentsVault</h1>
         <p>PDF Table Extractor & Converter</p>
       </div>
     </div>
@@ -86,6 +86,11 @@
             <label><input type="checkbox" id="chkImplicit" checked /> Detect borderless / whitespace rows</label>
             <label><input type="checkbox" id="chkDeskew" checked /> Auto-deskew & enhance low resolution</label>
           </div>
+        </div>
+
+        <div class="form-group">
+          <label><i class="fa-solid fa-columns"></i> Target Columns (Comma Separated)</label>
+          <input type="text" id="customColumnsInput" placeholder="Date, Description, Hours, Rate, Amount" />
         </div>
 
         <div class="form-group">
