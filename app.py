@@ -129,10 +129,11 @@ def extract_tables_vector(pdf_path, selected_pages):
                     
     return extracted_results
 
-def extract_tables_ocr(pdf_path, selected_pages, lang="eng", deskew=True):
+def extract_tables_ocr(pdf_path, selected_pages, lang="eng", deskew=True, target_columns=None):
     """
-    Extracts tables from scanned/image PDFs using pdf2image and Tesseract OCR,
-    dynamically deducing table headers and column boundaries from the document layout.
+    Extracts tables by detecting physical vertical grid lines using OpenCV 
+    morphology, automatically isolating columns (like the wide Description box) 
+    regardless of document width or tilt.
     """
     extracted_results = []
     
@@ -142,23 +143,105 @@ def extract_tables_ocr(pdf_path, selected_pages, lang="eng", deskew=True):
         return extract_tables_vector(pdf_path, selected_pages)
 
     images = convert_from_path(pdf_path, poppler_path=POPPLER_PATH)
-    
+
     for p_idx in selected_pages:
         if p_idx >= len(images):
             continue
             
         pil_img = images[p_idx]
         img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-
-        # Image Preprocessing & Deskew
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        if deskew:
-            gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-        # Extract text via Tesseract OCR with detailed bounding box data
-        data = pytesseract.image_to_data(gray, lang=lang, output_type=pytesseract.Output.DICT)
+        # 1. Deskew
+        if deskew:
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+            coords = np.column_stack(np.where(thresh > 0))
+            if len(coords) > 100:
+                angle = cv2.minAreaRect(coords)[-1]
+                if angle < -45:
+                    angle = -(90 + angle)
+                else:
+                    angle = -angle
+                if abs(angle) > 0.5:
+                    (h_img, w_img) = gray.shape[:2]
+                    center = (w_img // 2, h_img // 2)
+                    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                    gray = cv2.warpAffine(gray, M, (w_img, h_img), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+                    gray = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+        # 2. Isolate Table Region via Contours
+        thresh_table = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+        kernel_box = cv2.getStructuringElement(cv2.MORPH_RECT, (30, 5))
+        dilated = cv2.dilate(thresh_table, kernel_box, iterations=2)
+        contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        # Group words by vertical line (within 12px tolerance)
+        table_box = None
+        max_area = 0
+        page_area = gray.shape[0] * gray.shape[1]
+
+        for c in contours:
+            area = cv2.contourArea(c)
+            if area > (page_area * 0.15):
+                x, y, w, h = cv2.boundingRect(c)
+                if h < gray.shape[0] * 0.95 and area > max_area:
+                    max_area = area
+                    table_box = (x, y, w, h)
+
+        if table_box:
+            x, y, w, h = table_box
+            table_roi = gray[y:y+h, x:x+w]
+        else:
+            h_img, w_img = gray.shape
+            table_roi = gray[int(h_img*0.1):int(h_img*0.9), int(w_img*0.05):int(w_img*0.95)]
+
+        roi_h, roi_w = table_roi.shape
+
+        # 3. Detect Physical Vertical Grid Lines for Exact Column Boundaries
+        roi_inv = cv2.bitwise_not(table_roi)
+        _, roi_bin = cv2.threshold(roi_inv, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU)
+
+        # Create vertical kernel to isolate vertical grid lines drawn on the table
+        vert_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(15, roi_h // 10)))
+        vert_lines = cv2.morphologyEx(roi_bin, cv2.MORPH_OPEN, vert_kernel, iterations=2)
+
+        # Sum vertically to find the exact X coordinates of vertical grid lines
+        vert_sum = np.sum(vert_lines, axis=0) / 255
+        
+        split_points = []
+        in_line = False
+        line_start = 0
+        
+        for px in range(roi_w):
+            if vert_sum[px] > (roi_h * 0.15):  # Line spans significant height of the table row
+                if not in_line:
+                    in_line = True
+                    line_start = px
+            else:
+                if in_line:
+                    in_line = False
+                    split_points.append((line_start + px) // 2)
+
+        # Filter out outer boundary box edges, keeping inner column separators
+        inner_splits = [sp for sp in split_points if sp > roi_w * 0.03 and sp < roi_w * 0.97]
+        
+        if len(inner_splits) >= 2:
+            split_points = sorted(inner_splits)
+        else:
+            # Fallback proportional split if grid lines are faint
+            split_points = [
+                int(roi_w * 0.10),
+                int(roi_w * 0.18),
+                int(roi_w * 0.72),
+                int(roi_w * 0.81),
+                int(roi_w * 0.90)
+            ]
+
+        num_cols = len(split_points) + 1
+
+        # 4. OCR Extraction on Table ROI
+        data = pytesseract.image_to_data(table_roi, lang=lang, output_type=pytesseract.Output.DICT)
+        
         n_boxes = len(data['text'])
         lines = {}
         for i in range(n_boxes):
@@ -172,63 +255,36 @@ def extract_tables_ocr(pdf_path, selected_pages, lang="eng", deskew=True):
                     lines[line_key] = []
                 lines[line_key].append((left, left + width, text))
 
-        if not lines:
-            continue
-
+        matrix = []
         sorted_line_keys = sorted(lines.keys())
         
-        # Dynamically detect column boundaries by finding horizontal gaps in the header rows
-        header_spans = []
-        for k in sorted_line_keys[:3]:  # Analyze top 3 lines for header structure
-            for left, right, text in lines[k]:
-                header_spans.append((left, right))
-        
-        header_spans.sort(key=lambda x: x[0])
-        
-        # Calculate dynamic column split points based on spaces between header words
-        split_points = [350, 520, 680]  # Default fallback split points
-        if len(header_spans) >= 2:
-            gaps = []
-            for i in range(len(header_spans) - 1):
-                current_right = header_spans[i][1]
-                next_left = header_spans[i+1][0]
-                gap = next_left - current_right
-                if gap > 15:  # Significant horizontal gap indicating a column boundary
-                    gaps.append((current_right + next_left) / 2)
-            if gaps:
-                split_points = sorted(gaps[:3])
-
-        matrix = []
         for line_key in sorted_line_keys:
             sorted_words = sorted(lines[line_key], key=lambda x: x[0])
             
-            # Partition row words into dynamic columns based on deduced split points
-            cols = [[] for _ in range(len(split_points) + 1)]
-            
+            col_words = [[] for _ in range(num_cols)]
             for left, right, word in sorted_words:
-                assigned = False
+                word_center = (left + right) / 2
+                assigned_idx = num_cols - 1
                 for idx, sp in enumerate(split_points):
-                    if left < sp:
-                        cols[idx].append(word)
-                        assigned = True
+                    if word_center < sp:
+                        assigned_idx = idx
                         break
-                if not assigned:
-                    cols[-1].append(word)
-
-            row_cells = [" ".join(col).strip() for col in cols]
-            if any(row_cells):
+                col_words[assigned_idx].append(word)
+            
+            row_cells = [" ".join(cw).strip() for cw in col_words]
+            row_text_joined = "".join(row_cells).lower()
+            if any(row_cells) and not any(noise in row_text_joined for noise in ["page", "confidential"]):
                 matrix.append(row_cells)
 
-        if matrix:
+        if len(matrix) > 0:
             extracted_results.append({
-                "name": f"Page {p_idx + 1} - Deduced Table (OCR)",
+                "name": f"Page {p_idx + 1} - Grid-Aligned Table",
                 "page": p_idx + 1,
                 "data": matrix
             })
 
     return extracted_results
-
-
+               
 @app.route("/frontend/")
 def index():
     return send_from_directory(FRONTEND_DIR, "index.html")
@@ -262,6 +318,10 @@ def process_pdf():
     ocr_lang = request.form.get("ocrLanguage", "eng")
     page_range = request.form.get("pageRange", "")
     auto_deskew = request.form.get("chkDeskew", "true").lower() == "true"
+    
+    # Read custom columns from webpage input
+    custom_cols_str = request.form.get("customColumns", "")
+    target_columns = [c.strip() for c in custom_cols_str.split(",") if c.strip()]
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
         file.save(temp_pdf.name)
@@ -277,12 +337,11 @@ def process_pdf():
         if engine_mode == "vector_digital":
             tables = extract_tables_vector(temp_pdf_path, selected_pages)
         elif engine_mode == "ocr_scanned":
-            tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew)
+            tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew, target_columns=target_columns)
         else:
-            # Hybrid / Auto-Detect mode
             tables = extract_tables_vector(temp_pdf_path, selected_pages)
             if not tables:
-                tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew)
+                tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew, target_columns=target_columns)
 
         return jsonify({
             "filename": file.filename,

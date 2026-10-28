@@ -52,8 +52,23 @@ def setup_tesseract():
     if os.path.isfile(BUNDLED_TESSERACT_EXE):
         pytesseract.pytesseract.tesseract_cmd = BUNDLED_TESSERACT_EXE
 
-        # The bundled directory contains the tessdata folder.
-        os.environ["TESSDATA_PREFIX"] = BUNDLED_TESSERACT_DIR
+        # Tesseract language files are inside the tessdata subfolder.
+        tessdata_dir = os.path.join(
+            BUNDLED_TESSERACT_DIR,
+            "tessdata"
+        )
+
+        english_data = os.path.join(
+            tessdata_dir,
+            "eng.traineddata"
+        )
+
+        if not os.path.isfile(english_data):
+            raise FileNotFoundError(
+                f"English OCR language data not found: {english_data}"
+            )
+
+        os.environ["TESSDATA_PREFIX"] = tessdata_dir
         return
 
     """Configures pytesseract with the executable at D:\\Tesseract-OCR."""

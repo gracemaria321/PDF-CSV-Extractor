@@ -127,6 +127,7 @@ document.addEventListener("DOMContentLoaded", () => {
     formData.append("ocrLanguage", document.getElementById("ocrLanguageSelect").value);
     formData.append("chkDeskew", document.getElementById("chkDeskew").checked);
     formData.append("pageRange", document.getElementById("pageRangeInput").value);
+    formData.append("customColumns", document.getElementById("customColumnsInput").value);
 
     updateProgress(50, "Running OCR & Layout Extraction...", "Analyzing tables via Tesseract & Poppler...");
 
