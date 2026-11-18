@@ -70,7 +70,7 @@ FRONTEND_DIR = resource_path("frontend")
 
 # Initialize Flask App with bundled paths
 app = Flask(__name__, static_folder=FRONTEND_DIR, template_folder=FRONTEND_DIR)
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # Limit file uploads to 50MB
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # Limit file uploads to 500MB
 
 def parse_page_range(range_str, max_pages):
     """
@@ -307,59 +307,64 @@ def health_check():
 
 @app.route("/api/extract", methods=["POST"])
 def process_pdf():
-    if 'pdf' not in request.files:
-        return jsonify({"error": "No PDF file provided"}), 400
+    uploaded_files = request.files.getlist('pdfs')
+    if not uploaded_files and 'pdf' in request.files:
+        uploaded_files = [request.files['pdf']]
 
-    file = request.files['pdf']
-    if file.filename == '' or not file.filename.lower().endswith('.pdf'):
-        return jsonify({"error": "Invalid file type. Please upload a valid PDF."}), 400
+    valid_pdfs = [f for f in uploaded_files if f.filename and f.filename.lower().endswith('.pdf')]
+    if not valid_pdfs:
+        return jsonify({"error": "No valid PDF files provided."}), 400
 
     engine_mode = request.form.get("engineMode", "hybrid")
     ocr_lang = request.form.get("ocrLanguage", "eng")
     page_range = request.form.get("pageRange", "")
     auto_deskew = request.form.get("chkDeskew", "true").lower() == "true"
     
-    # Read custom columns from webpage input
     custom_cols_str = request.form.get("customColumns", "")
     target_columns = [c.strip() for c in custom_cols_str.split(",") if c.strip()]
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
-        file.save(temp_pdf.name)
-        temp_pdf_path = temp_pdf.name
+    all_tables = []
+    total_pages = 0
 
-    try:
-        with pdfplumber.open(temp_pdf_path) as pdf:
-            total_pages = len(pdf.pages)
+    for file in valid_pdfs:
+        clean_filename = os.path.basename(file.filename)
 
-        selected_pages = parse_page_range(page_range, total_pages)
-        tables = []
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_pdf:
+            file.save(temp_pdf.name)
+            temp_pdf_path = temp_pdf.name
 
-        if engine_mode == "vector_digital":
-            tables = extract_tables_vector(temp_pdf_path, selected_pages)
-        elif engine_mode == "ocr_scanned":
-            tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew, target_columns=target_columns)
-        else:
-            tables = extract_tables_vector(temp_pdf_path, selected_pages)
-            if not tables:
-                tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew, target_columns=target_columns)
+        try:
+            with pdfplumber.open(temp_pdf_path) as pdf:
+                doc_pages = len(pdf.pages)
+                total_pages += doc_pages
 
-        return jsonify({
-            "filename": file.filename,
-            "totalPages": total_pages,
-            "processedPages": selected_pages,
-            "tables": tables
-        })
+            selected_pages = parse_page_range(page_range, doc_pages)
+            doc_tables = []
 
-    except Exception as e:
-        print(f"[Error processing PDF] {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"Failed to process PDF: {str(e)}"}), 500
+            if engine_mode == "vector_digital":
+                doc_tables = extract_tables_vector(temp_pdf_path, selected_pages)
+            elif engine_mode == "ocr_scanned":
+                doc_tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew, target_columns=target_columns)
+            else:
+                doc_tables = extract_tables_vector(temp_pdf_path, selected_pages)
+                if not doc_tables:
+                    doc_tables = extract_tables_ocr(temp_pdf_path, selected_pages, lang=ocr_lang, deskew=auto_deskew, target_columns=target_columns)
 
-    finally:
-        if os.path.exists(temp_pdf_path):
-            os.remove(temp_pdf_path)
+            for tbl in doc_tables:
+                tbl["sourceFile"] = clean_filename
+                all_tables.append(tbl)
 
+        except Exception as e:
+            print(f"[Error processing {clean_filename}] {str(e)}")
+        finally:
+            if os.path.exists(temp_pdf_path):
+                os.remove(temp_pdf_path)
+
+    return jsonify({
+        "fileCount": len(valid_pdfs),
+        "totalPages": total_pages,
+        "tables": all_tables
+    })
 def open_browser():
     webbrowser.open("http://127.0.0.1:5000/frontend/")
 
