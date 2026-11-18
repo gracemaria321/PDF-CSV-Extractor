@@ -130,6 +130,26 @@ body {
   background: #fafafa;
 }
 
+.upload-mode-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.selectors-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .drop-zone:hover, .drop-zone.dragover {
   border-color: var(--accent-primary);
   background: #eff6ff;
@@ -264,6 +284,10 @@ select:focus, input[type="text"]:focus {
 
 .btn-sm:hover:not(:disabled) { background: #f1f5f9; }
 .btn-sm.danger { color: var(--accent-danger); }
+
+.selected-col {
+  background-color: #ffeb99;
+}
 
 .icon-btn {
   background: none;
